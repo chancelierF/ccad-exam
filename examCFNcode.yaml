@@ -1,9 +1,5 @@
 Parameters:
 
-  TableName:
-    Type: 'String'
-    Description: 'The name of the DynamoDB table'
-
   vpcCIDR:
     Type: String
     Default: "10.50.0.0/16"
@@ -39,11 +35,6 @@ Parameters:
     Default: "us-east-1b"
     Description: "Enter Your AZ2 ID"
 
-  
-  MyEIPInstanceId:
-    Type: String
-    Description: "ID of the EC2 instance to associate the Elastic IP address with"
-
   NatGW:
     Type: String
     Description: "The ID of the NAT Gateway"
@@ -67,40 +58,6 @@ Parameters:
   
 
 Resources:
-
-  WriteCapacityScalableTarget:
-    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
-    Properties:
-      MaxCapacity: 20
-      MinCapacity: 5
-      ResourceId: !Sub "table/${TableName}"
-      RoleARN: !GetAtt ApplicationAutoScalingRole.Arn
-      ScalableDimension: 'dynamodb:table:WriteCapacityUnits'
-      ServiceNamespace: 'dynamodb'
-
-  ApplicationAutoScalingRole:
-    Type: 'AWS::IAM::Role'
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: 'Allow'
-            Principal:
-              Service: 'application-autoscaling.amazonaws.com'
-            Action: 'sts:AssumeRole'
-      Policies:
-        - PolicyName: 'ApplicationAutoScalingPolicy'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action:
-                  - 'dynamodb:DescribeTable'
-                  - 'dynamodb:UpdateTable'
-                  - 'cloudwatch:PutMetricAlarm'
-                  - 'cloudwatch:DescribeAlarms'
-                  - 'cloudwatch:DeleteAlarms'
-                Resource: '*'
 
   customVPC:
     Type: AWS::EC2::VPC
@@ -209,49 +166,42 @@ Resources:
       RouteTableId:
         Ref: PublicRouteTable
 
-  
-    
   MyEIP:
     Type: AWS::EC2::EIP
     Properties:
-      InstanceId: !Ref MyEIPInstanceId
-
-  NATGatewayEIP:
-    Type: AWS::EC2::EIP
-    Properties:
-      Domain: !Ref customVPC
+      Domain: 'vpc'
 
   NATGateway:
     Type: AWS::EC2::NatGateway
     Properties:
-      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      AllocationId: !GetAtt MyEIP.AllocationId
       SubnetId: !Ref PblicSub1
 
 
-  PrivateRouteTable:
-    Type: 'AWS::EC2::RouteTable'
+  PrivRTab:
+    Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref customVPC
 
-  PrivateRoute:
-    Type: 'AWS::EC2::Route'
+  PrivRT:
+    Type:  AWS::EC2::Route
+    DependsOn: AttachGateway
     Properties:
-      RouteTableId: !Ref PrivateRouteTable
-      DestinationCidrBlock: '0.0.0.0/0'
-      NatGatewayId: !Ref NatGW
-    DependsOn: PrivateRouteTable
+      RouteTableId: !Ref PrivRTab
+      DestinationCidrBlock: 0.0.0.0/0
+    
 
   Subnet2RouteTableAssociation:
-    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PrivSub1
-      RouteTableId: !Ref PrivateRouteTable
+      RouteTableId: !Ref PrivRTab
 
   Subnet4RouteTableAssociation:
-    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PrivSub2
-      RouteTableId: !Ref PrivateRouteTable
+      RouteTableId: !Ref PrivRTab
 
  
   InstanceSecurityGroup:
@@ -292,5 +242,21 @@ Resources:
       SecurityGroupIds: 
         - !Ref InstanceSecurityGroup
       SubnetId: !Ref PrivSub1
+
+  MyDynamoDBTable:
+    Type: "AWS::DynamoDB::Table"
+    Properties: 
+      TableName: "metroddb"
+      AttributeDefinitions: 
+        - 
+          AttributeName: "PrimaryKey"
+          AttributeType: "S"
+      KeySchema: 
+        - 
+          AttributeName: "PrimaryKey"
+          KeyType: "HASH"
+      ProvisionedThroughput: 
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
       
  
