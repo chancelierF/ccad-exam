@@ -1,0 +1,296 @@
+Parameters:
+
+  TableName:
+    Type: 'String'
+    Description: 'The name of the DynamoDB table'
+
+  vpcCIDR:
+    Type: String
+    Default: "10.50.0.0/16"
+    Description: "Enter Your VPC CIDR"
+  
+  subnet1CIDR:
+    Type: String
+    Default: "10.50.1.0/24"
+    Description: "Enter Your subnet1 CIDR"
+
+  subnet2CIDR:
+    Type: String
+    Default: "10.50.2.0/24"
+    Description: "Enter Your subnet2 CIDR"
+
+  subnet3CIDR:
+    Type: String
+    Default: "10.50.3.0/24"
+    Description: "Enter Your subnet3 CIDR"
+  
+  subnet4CIDR:
+    Type: String
+    Default: "10.50.4.0/24"
+    Description: "Enter Your subnet4 CIDR"
+  
+  avzones1:
+    Type: String
+    Default: "us-east-1a"
+    Description: "Enter Your AZ1 ID"
+
+  avzones2:
+    Type: String
+    Default: "us-east-1b"
+    Description: "Enter Your AZ2 ID"
+
+  
+  MyEIPInstanceId:
+    Type: String
+    Description: "ID of the EC2 instance to associate the Elastic IP address with"
+
+  NatGW:
+    Type: String
+    Description: "The ID of the NAT Gateway"
+
+  InstanceTypeParameter:
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - m1.small
+      - m1.large
+    Description: Enter t2.micro, m1.small, or m1.large. Default is t2.micro.
+  
+  EC2KeyPair:
+    Type: AWS::EC2::KeyPair::KeyName
+  
+  amiID:
+    Type: String
+    Default: "ami-0bb84b8ffd87024d8"
+    Description: "Enter Your EC2 AMI ID"
+  
+
+Resources:
+
+  WriteCapacityScalableTarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    Properties:
+      MaxCapacity: 20
+      MinCapacity: 5
+      ResourceId: !Sub "table/${TableName}"
+      RoleARN: !GetAtt ApplicationAutoScalingRole.Arn
+      ScalableDimension: 'dynamodb:table:WriteCapacityUnits'
+      ServiceNamespace: 'dynamodb'
+
+  ApplicationAutoScalingRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'application-autoscaling.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'ApplicationAutoScalingPolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'dynamodb:DescribeTable'
+                  - 'dynamodb:UpdateTable'
+                  - 'cloudwatch:PutMetricAlarm'
+                  - 'cloudwatch:DescribeAlarms'
+                  - 'cloudwatch:DeleteAlarms'
+                Resource: '*'
+
+  customVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref vpcCIDR
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      Tags:
+       - Key: stack
+         Value: production
+
+  customInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+      - Key: stack
+        Value: production
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: customVPC 
+      InternetGatewayId:
+        Ref: customInternetGateway
+  
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:  
+        Ref: customVPC
+      Tags:
+      - Key: stack
+        Value: production
+
+  myRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+       RouteTableId:
+         Ref: PublicRouteTable
+       DestinationCidrBlock: 0.0.0.0/0
+       GatewayId:
+         Ref: customInternetGateway
+
+  PrivSub1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: customVPC
+      CidrBlock: !Ref subnet2CIDR
+      AvailabilityZone: !Ref avzones1
+      Tags:
+      - Key: stack
+        Value: production
+
+  
+  PblicSub1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: customVPC
+      CidrBlock: !Ref subnet1CIDR
+      AvailabilityZone: !Ref avzones1
+      MapPublicIpOnLaunch: true
+      Tags:
+      - Key: stack
+        Value: production
+
+  PrivSub2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: customVPC
+      CidrBlock: !Ref subnet4CIDR
+      AvailabilityZone: !Ref avzones2
+      Tags:
+      - Key: stack
+        Value: production
+
+  PblicSub2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: customVPC
+      CidrBlock: !Ref subnet3CIDR
+      AvailabilityZone: !Ref avzones2
+      MapPublicIpOnLaunch: true
+      Tags:
+      - Key: stack
+        Value: production
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PblicSub1
+      RouteTableId:
+        Ref: PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PblicSub2
+      RouteTableId:
+        Ref: PublicRouteTable
+
+  
+    
+  MyEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref MyEIPInstanceId
+
+  NATGatewayEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: !Ref customVPC
+
+  NATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      SubnetId: !Ref PblicSub1
+
+
+  PrivateRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref customVPC
+
+  PrivateRoute:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      NatGatewayId: !Ref NatGW
+    DependsOn: PrivateRouteTable
+
+  Subnet2RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PrivSub1
+      RouteTableId: !Ref PrivateRouteTable
+
+  Subnet4RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PrivSub2
+      RouteTableId: !Ref PrivateRouteTable
+
+ 
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http to client host
+      VpcId: !Ref customVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+
+  
+  MyEC2Instance: 
+    Type: AWS::EC2::Instance
+    Properties: 
+      ImageId: !Ref amiID
+      KeyName: !Ref EC2KeyPair
+      InstanceType: !Ref InstanceTypeParameter
+      SecurityGroupIds: 
+        - !Ref InstanceSecurityGroup
+      SubnetId: !Ref PblicSub1
+  
+  MyEC2Instance2: 
+    Type: AWS::EC2::Instance
+    Properties: 
+      ImageId: !Ref amiID
+      KeyName: !Ref EC2KeyPair
+      InstanceType: !Ref InstanceTypeParameter
+      SecurityGroupIds: 
+        - !Ref InstanceSecurityGroup
+      SubnetId: !Ref PrivSub1
+      
+ 
